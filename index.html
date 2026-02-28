@@ -390,16 +390,7 @@ class AudioSys {
   down(){ this.crowd(1.0); this._tone('sine',180,55,0.22,0.45); }
   ko(){ this.bell(); this.crowd(1.4); this._tone('triangle',240,70,0.18,0.35); }
 
-  bgmOn(){
-    if(!this.ctx||!this.enabled||this.bgmNodes) return;
-    const mk=(type,f,v)=>{ const o=this.ctx.createOscillator(), g=this.ctx.createGain(); o.type=type; o.frequency.value=f; g.gain.value=v; o.connect(g); g.connect(this._dest()); o.start(); return {o,g}; };
-    // 전자음 느낌 줄이고 은은한 드론
-    const a=mk('sine',98,0.018), b=mk('triangle',147,0.012), c=mk('sine',196,0.008);
-    const lfo=this.ctx.createOscillator(), lfg=this.ctx.createGain();
-    lfo.type='sine'; lfo.frequency.value=0.11; lfg.gain.value=8;
-    lfo.connect(lfg); lfg.connect(b.o.frequency); lfo.start();
-    this.bgmNodes={a,b,c,lfo,lfg};
-  }
+  bgmOn(){ return; }
   bgmOff(){
     if(!this.bgmNodes) return;
     const ns=this.bgmNodes;
