@@ -487,8 +487,8 @@ class BoxingGame {
     this._spot.position.set(0,13,0); this._spot.castShadow=true;
     this._spot.shadow.mapSize.set(1024,1024);
     this.scene.add(this._spot,this._spot.target);
-    this.scene.add(Object.assign(new THREE.PointLight(0x4466ff,.6,18),{position:{x:-6,y:5,z:-5}}));
-    this.scene.add(Object.assign(new THREE.PointLight(0xff4422,.6,18),{position:{x:6,y:5,z:-5}}));
+        const pl1=new THREE.PointLight(0x4466ff,.6,18); pl1.position.set(-6,5,-5); this.scene.add(pl1);
+    const pl2=new THREE.PointLight(0xff4422,.6,18); pl2.position.set(6,5,-5); this.scene.add(pl2);
 
     this._ringObj=buildRing(this.scene, STAGES[0].ringColor);
 
