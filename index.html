@@ -283,56 +283,128 @@ const STAGES = [
 // AUDIO
 // ══════════════════════════════════════════
 class AudioSys {
-  constructor(){ this.ctx=null; this.master=null; this.enabled=true; this.bgmNodes=null }
+  constructor(){
+    this.ctx=null; this.master=null; this.comp=null;
+    this.enabled=true; this.bgmNodes=null;
+  }
   init(){
     try{
       if(!this.ctx) this.ctx=new(window.AudioContext||window.webkitAudioContext)();
       if(this.ctx && this.ctx.state==='suspended') this.ctx.resume();
       if(!this.master && this.ctx){
         this.master=this.ctx.createGain();
-        this.master.gain.value=0.9;
-        this.master.connect(this.ctx.destination);
+        this.master.gain.value=0.88;
+
+        this.comp=this.ctx.createDynamicsCompressor();
+        this.comp.threshold.value=-24;
+        this.comp.knee.value=28;
+        this.comp.ratio.value=6;
+        this.comp.attack.value=0.003;
+        this.comp.release.value=0.16;
+
+        this.master.connect(this.comp);
+        this.comp.connect(this.ctx.destination);
       }
     }catch(e){}
   }
-  _n(dur,freq,q,vol,dec){
-    if(!this.ctx)return;
-    const sr=this.ctx.sampleRate, buf=this.ctx.createBuffer(1,sr*dur,sr), d=buf.getChannelData(0);
-    for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
-    const src=this.ctx.createBufferSource(), f=this.ctx.createBiquadFilter(), g=this.ctx.createGain();
-    f.type='bandpass'; f.frequency.value=freq; f.Q.value=q;
+  _dest(){ return this.comp || this.master || (this.ctx&&this.ctx.destination); }
+
+  _tone(type,f0,f1,vol,dec){
+    if(!this.ctx||!this.enabled) return;
     const t=this.ctx.currentTime;
-    g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.001,t+dec);
-    src.buffer=buf; src.connect(f); f.connect(g); g.connect(this.master||this.ctx.destination); src.start(t);
+    const o=this.ctx.createOscillator();
+    const g=this.ctx.createGain();
+    o.type=type;
+    o.frequency.setValueAtTime(f0,t);
+    if(f1) o.frequency.exponentialRampToValueAtTime(Math.max(20,f1), t+dec);
+    g.gain.setValueAtTime(Math.max(0.0001,vol),t);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dec);
+    o.connect(g); g.connect(this._dest());
+    o.start(t); o.stop(t+dec+0.03);
   }
-  _o(type,f0,f1,vol,dec){
-    if(!this.ctx)return;
-    const o=this.ctx.createOscillator(), g=this.ctx.createGain(), t=this.ctx.currentTime;
-    o.type=type; o.frequency.setValueAtTime(f0,t);
-    if(f1) o.frequency.exponentialRampToValueAtTime(f1,t+dec);
-    g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.001,t+dec);
-    o.connect(g); g.connect(this.master||this.ctx.destination); o.start(t); o.stop(t+dec+.05);
+
+  _noise(dur,{type='bandpass',freq=400,q=0.7,vol=0.2,dec=0.12}={}){
+    if(!this.ctx||!this.enabled) return;
+    const sr=this.ctx.sampleRate;
+    const len=Math.max(1,Math.floor(sr*dur));
+    const buf=this.ctx.createBuffer(1,len,sr);
+    const d=buf.getChannelData(0);
+    // pink-ish noise (덜 전자음)
+    let b0=0,b1=0,b2=0;
+    for(let i=0;i<len;i++){
+      const w=Math.random()*2-1;
+      b0=0.99765*b0+w*0.0990460;
+      b1=0.96300*b1+w*0.2965164;
+      b2=0.57000*b2+w*1.0526913;
+      d[i]=(b0+b1+b2+w*0.1848)*0.17;
+    }
+    const t=this.ctx.currentTime;
+    const src=this.ctx.createBufferSource();
+    const f=this.ctx.createBiquadFilter();
+    const g=this.ctx.createGain();
+    f.type=type; f.frequency.value=freq; f.Q.value=q;
+    g.gain.setValueAtTime(Math.max(0.0001,vol),t);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dec);
+    src.buffer=buf;
+    src.connect(f); f.connect(g); g.connect(this._dest());
+    src.start(t); src.stop(t+dur+0.02);
   }
-  bell(){ this._o('sine',880,320,.9,2.3); this._o('sine',1320,660,.3,1.1); this._o('sine',440,180,.4,2.8) }
-  hit(head){ this._n(.12,head?900:230,.6,1.8,.14); this._o('sine',head?130:70,30,.9,.12) }
-  miss(){ this._o('sawtooth',380,180,.12,.09) }
-  block(){ this._o('square',280,120,.25,.10); this._n(.06,400,1,.4,.08) }
-  crowd(v){ this._n(1.8,500,.25,v*.28,1.6); this._n(1.8,200,.3,v*.18,1.4) }
-  down(){ this.crowd(1.1); this._o('sine',220,40,.6,.7) }
-  ko(){ this.bell(); this.crowd(1.5) }
+
+  bell(){
+    if(!this.enabled) return;
+    this._tone('triangle',740,300,0.26,0.7);
+    this._tone('sine',1110,520,0.18,0.5);
+    this._tone('sine',420,200,0.12,0.9);
+  }
+
+  // 실제 타격 느낌: 저역 thump + 중역 crack + 짧은 공기음
+  hit(head){
+    if(!this.enabled) return;
+    const v=0.9 + Math.random()*0.18;
+    this._tone('sine', head?165:115, 55, 0.42*v, 0.10);
+    this._noise(0.12,{type:'bandpass',freq:head?1200:700,q:0.8,vol:0.24*v,dec:0.11});
+    this._noise(0.06,{type:'highpass',freq:2200,q:0.7,vol:0.08*v,dec:0.06});
+  }
+
+  miss(){
+    if(!this.enabled) return;
+    // 훅 빗맞는 '휙' 소리
+    this._noise(0.14,{type:'bandpass',freq:1500,q:0.5,vol:0.12,dec:0.13});
+    this._tone('triangle',280,180,0.05,0.11);
+  }
+
+  block(){
+    if(!this.enabled) return;
+    // 글러브/가드 맞는 둔탁한 느낌
+    this._tone('square',210,120,0.09,0.08);
+    this._noise(0.08,{type:'bandpass',freq:900,q:1.1,vol:0.18,dec:0.08});
+  }
+
+  crowd(v){
+    if(!this.enabled) return;
+    const vol=Math.max(0.05,Math.min(0.32,v*0.14));
+    this._noise(1.1,{type:'bandpass',freq:460,q:0.35,vol,dec:1.0});
+    this._noise(1.0,{type:'highpass',freq:220,q:0.5,vol:vol*0.5,dec:0.9});
+  }
+
+  down(){ this.crowd(1.0); this._tone('sine',180,55,0.22,0.45); }
+  ko(){ this.bell(); this.crowd(1.4); this._tone('triangle',240,70,0.18,0.35); }
+
   bgmOn(){
     if(!this.ctx||!this.enabled||this.bgmNodes) return;
-    const mk=(type,f,v)=>{ const o=this.ctx.createOscillator(), g=this.ctx.createGain(); o.type=type; o.frequency.value=f; g.gain.value=v; o.connect(g); g.connect(this.master||this.ctx.destination); o.start(); return {o,g}; };
-    const a=mk('triangle',110,0.035), b=mk('sine',165,0.02), c=mk('square',82.5,0.012);
+    const mk=(type,f,v)=>{ const o=this.ctx.createOscillator(), g=this.ctx.createGain(); o.type=type; o.frequency.value=f; g.gain.value=v; o.connect(g); g.connect(this._dest()); o.start(); return {o,g}; };
+    // 전자음 느낌 줄이고 은은한 드론
+    const a=mk('sine',98,0.018), b=mk('triangle',147,0.012), c=mk('sine',196,0.008);
     const lfo=this.ctx.createOscillator(), lfg=this.ctx.createGain();
-    lfo.type='sine'; lfo.frequency.value=0.18; lfg.gain.value=22;
-    lfo.connect(lfg); lfg.connect(a.o.frequency); lfo.start();
+    lfo.type='sine'; lfo.frequency.value=0.11; lfg.gain.value=8;
+    lfo.connect(lfg); lfg.connect(b.o.frequency); lfo.start();
     this.bgmNodes={a,b,c,lfo,lfg};
   }
   bgmOff(){
     if(!this.bgmNodes) return;
-    const ns=this.bgmNodes; ['a','b','c'].forEach(k=>{ try{ns[k].g.gain.exponentialRampToValueAtTime(0.0001,this.ctx.currentTime+0.18); ns[k].o.stop(this.ctx.currentTime+0.22);}catch(e){} });
-    try{ ns.lfo.stop(this.ctx.currentTime+0.22);}catch(e){}
+    const ns=this.bgmNodes;
+    ['a','b','c'].forEach(k=>{ try{ ns[k].g.gain.exponentialRampToValueAtTime(0.0001,this.ctx.currentTime+0.22); ns[k].o.stop(this.ctx.currentTime+0.26); }catch(e){} });
+    try{ ns.lfo.stop(this.ctx.currentTime+0.26);}catch(e){}
     this.bgmNodes=null;
   }
   setEnabled(on){ this.enabled=!!on; if(!on) this.bgmOff(); else this.bgmOn(); }
